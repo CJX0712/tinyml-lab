@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TinyML Lab — 浏览器内微型神经网络实验室</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2330; --muted:#6b7686;
+    --line:#e3e7ee; --accent:#2456e6; --c1:#e2593f; --c0:#2a7de1;
+    --ok:#1d9a5b; --warn:#c98a1b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font:14px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    padding:20px;max-width:1060px;margin:0 auto}
+  h1{font-size:20px;letter-spacing:.5px}
+  h1 .tag{font-size:11px;color:var(--accent);border:1px solid var(--accent);
+    border-radius:10px;padding:1px 8px;margin-left:8px;vertical-align:3px}
+  .sub{color:var(--muted);font-size:12px;margin:4px 0 16px}
+  .layout{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .ctrl{width:250px;display:flex;flex-direction:column;gap:12px}
+  .ctrl label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  select,button{font:inherit;width:100%;padding:6px 8px;border:1px solid var(--line);
+    border-radius:6px;background:#fff;color:var(--ink)}
+  select:focus{outline:2px solid #bcd0ff}
+  .row{display:flex;gap:8px}
+  button{cursor:pointer;font-weight:600}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.ghost{background:#fff;color:var(--ink)}
+  button:disabled{opacity:.45;cursor:default}
+  .stat{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);
+    border-top:1px dashed var(--line);padding-top:8px}
+  .stat b{color:var(--ink);font-variant-numeric:tabular-nums}
+  #board{image-rendering:pixelated;border:1px solid var(--line);border-radius:8px}
+  #lossChart{border:1px solid var(--line);border-radius:8px;background:#fff}
+  .viz{display:flex;flex-direction:column;gap:10px;flex:1;min-width:480px}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+  .how{font-size:12px;color:var(--muted);line-height:1.7}
+  .how code{background:#eef1f6;border-radius:4px;padding:0 4px}
+  .foot{margin-top:16px;font-size:11px;color:#9aa4b2;text-align:center}
+</style>
+</head>
+<body>
+  <h1>TinyML Lab<span class="tag">零依赖 · 手写反向传播</span></h1>
+  <div class="sub">一个 2→H→H→1 的多层感知机在浏览器里从零训练 —— 不用任何框架，权重初始化、前向、反向、梯度全部手写，随时可暂停观察决策边界长出来。</div>
+
+  <div class="layout">
+    <div class="panel ctrl">
+      <div>
+        <label>数据集</label>
+        <select id="dsSel">
+          <option value="xor">XOR 四角</option>
+          <option value="circle">同心圆环</option>
+          <option value="moons">双月牙</option>
+          <option value="spiral">双螺旋（难）</option>
+        </select>
+      </div>
+      <div>
+        <label>隐藏层宽度（两层）</label>
+        <select id="hSel">
+          <option value="4">4</option>
+          <option value="8" selected>8</option>
+          <option value="16">16</option>
+          <option value="24">24</option>
+        </select>
+      </div>
+      <div>
+        <label>学习率</label>
+        <select id="lrSel">
+          <option value="0.05">0.05</option>
+          <option value="0.1" selected>0.1</option>
+          <option value="0.3">0.3</option>
+          <option value="0.5">0.5</option>
+        </select>
+      </div>
+      <div class="row">
+        <button class="primary" id="btnTrain">开始训练</button>
+        <button class="ghost" id="btnPause" disabled>暂停</button>
+      </div>
+      <button class="ghost" id="btnStep">单步 ×50</button>
+      <button class="ghost" id="btnReset">重置权重</button>
+      <div class="stat"><span>step</span><b id="stStep">0</b></div>
+      <div class="stat"><span>loss (BCE)</span><b id="stLoss">—</b></div>
+      <div class="stat"><span>accuracy</span><b id="stAcc">—</b></div>
+      <div class="how">
+        决策边界 = 网络输出 p(class=1) 的等高着色。 <code>tanh</code> 隐层 + <code>sigmoid</code>
+        输出，BCE 损失，带动量的批量梯度下降（β=0.9）。换个数据集或重置权重，看同一种子如何长出不同形状。
+      </div>
+    </div>
+
+    <div class="viz">
+      <div class="panel">
+        <div class="legend" style="margin-bottom:8px">
+          <span><span class="dot" style="background:var(--c0)"></span>class 0</span>
+          <span><span class="dot" style="background:var(--c1)"></span>class 1</span>
+          <span>深浅 = 输出概率，边界处接近 0.5</span>
+        </div>
+        <canvas id="board" width="480" height="480"></canvas>
+      </div>
+      <div class="panel">
+        <div class="legend" style="margin-bottom:6px"><span>loss 曲线（对数轴感观）</span></div>
+        <canvas id="lossChart" width="480" height="110"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">TinyML Lab · 单文件 HTML · 无外部依赖 · 晨星</div>
+
+<script id="engine">
+(function () {
+  var TML = {};
+
+  // ---------- seeded RNG ----------
+  TML.rng = function (seed) {
+    var s = seed >>> 0;
+    return function () {
+      s |= 0; s = (s + 0x6D2B79F5) | 0;
+      var t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  };
+  function gauss(rnd) { // Box-Muller
+    var u = 0, v = 0;
+    while (u === 0) u = rnd();
+    while (v === 0) v = rnd();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+
+  // ---------- datasets (deterministic by seed) ----------
+  function makeDS(kind, n, seed) {
+    var rnd = TML.rng(seed), X = [], y = [], i;
+    if (kind === 'xor') {
+      for (i = 0; i < n; i++) {
+        var qx = rnd() < 0.5 ? -1 : 1, qy = rnd() < 0.5 ? -1 : 1;
+        X.push([qx * (0.35 + rnd() * 0.6), qy * (0.35 + rnd() * 0.6)]);
+        y.push(qx * qy > 0 ? 1 : 0);
+      }
+    } else if (kind === 'circle') {
+      for (i = 0; i < n; i++) {
+        var inner = i % 2 === 0, r, a = rnd() * 2 * Math.PI;
+        r = inner ? rnd() * 0.42 : 0.72 + rnd() * 0.25;
+        X.push([r * Math.cos(a), r * Math.sin(a)]);
+        y.push(inner ? 1 : 0);
+      }
+    } else if (kind === 'moons') {
+      for (i = 0; i < n; i++) {
+        var top = i % 2 === 0, t = rnd() * Math.PI, nx = gauss(rnd) * 0.06, ny = gauss(rnd) * 0.06;
+        if (top) X.push([Math.cos(t) * 0.8 - 0.25 + nx, Math.sin(t) * 0.8 - 0.3 + ny]);
+        else     X.push([-Math.cos(t) * 0.8 + 0.25 + nx, -Math.sin(t) * 0.8 + 0.3 + ny]);
+        y.push(top ? 1 : 0);
+      }
+    } else { // spiral
+      for (i = 0; i < n; i++) {
+        var cls = i % 2, k = Math.floor(i / 2), tt = (k / (n / 2)) * 2.6 * Math.PI,
+            rr = 0.08 + (k / (n / 2)) * 0.85, spin = cls * Math.PI;
+        X.push([rr * Math.cos(tt + spin) + gauss(rnd) * 0.035,
+                rr * Math.sin(tt + spin) + gauss(rnd) * 0.035]);
+        y.push(cls);
+      }
+    }
+    return { X: X, y: y };
+  }
+  TML.makeDS = makeDS;
+
+  // ---------- MLP ----------
+  function Net(sizes, seed) {
+    var rnd = TML.rng(seed), L = sizes.length - 1;
+    this.sizes = sizes.slice();
+    this.W = []; this.b = [];
+    for (var l = 0; l < L; l++) {
+      var w = new Float64Array(sizes[l] * sizes[l + 1]),
+          scale = Math.sqrt(2.0 / (sizes[l] + sizes[l + 1]));
+      for (var j = 0; j < w.length; j++) w[j] = gauss(rnd) * scale;
+      this.W.push(w);
+      var bb = new Float64Array(sizes[l + 1]);
+      for (j = 0; j < bb.length; j++) bb[j] = 0;
+      this.b.push(bb);
+    }
+    this.vW = this.W.map(function (w) { return new Float64Array(w.length); });
+    this.vB = this.b.map(function (b) { return new Float64Array(b.length); });
+    this.beta = 0.9;
+  }
+
+  function forward(net, x) {
+    var acts = [Float64Array.from(x)], L = net.W.length;
+    for (var l = 0; l < L; l++) {
+      var prev = acts[l], out = new Float64Array(net.sizes[l + 1]);
+      for (var j = 0; j < out.length; j++) {
+        var s = net.b[l][j];
+        for (var i = 0; i < prev.length; i++) s += net.W[l][j * prev.length + i] * prev[i];
+        out[j] = (l === L - 1) ? 1 / (1 + Math.exp(-s)) : Math.tanh(s);
+      }
+      acts.push(out);
+    }
+    return acts;
+  }
+  Net.prototype.predict = function (x) { return forward(this, x)[this.W.length][0]; };
+
+  Net.prototype.trainEpoch = function (ds, lr) {
+    var n = ds.X.length, L = this.W.length;
+    var gW = [], gB = [];
+    for (var l = 0; l < L; l++) {
+      gW.push(new Float64Array(this.W[l].length));
+      gB.push(new Float64Array(this.b[l].length));
+    }
+    var loss = 0;
+    for (var k = 0; k < n; k++) {
+      var x = ds.X[k], target = ds.y[k];
+      var acts = forward(this, x), out = acts[L][0];
+      var pc = Math.min(1 - 1e-9, Math.max(1e-9, out));
+      loss += -(target * Math.log(pc) + (1 - target) * Math.log(1 - pc));
+      // delta at output: dL/dz for BCE+sigmoid
+      var delta = [Float64Array.from([out - target])];
+      for (l = L - 1; l >= 0; l--) {
+        var prev = acts[l], d = delta[0];
+        for (var j = 0; j < d.length; j++) {
+          gB[l][j] += d[j];
+          for (var i = 0; i < prev.length; i++) gW[l][j * prev.length + i] += d[j] * prev[i];
+        }
+        if (l > 0) {
+          var dPrev = new Float64Array(this.sizes[l]);
+          for (i = 0; i < dPrev.length; i++) {
+            var s2 = 0;
+            for (j = 0; j < d.length; j++) s2 += this.W[l][j * dPrev.length + i] * d[j];
+            dPrev[i] = s2 * (1 - acts[l][i] * acts[l][i]); // tanh'
+          }
+          delta = [dPrev];
+        }
+      }
+    }
+    for (l = 0; l < L; l++) {
+      for (var m = 0; m < this.W[l].length; m++) {
+        this.vW[l][m] = this.beta * this.vW[l][m] + gW[l][m] / n;
+        this.W[l][m] -= lr * this.vW[l][m];
+      }
+      for (m = 0; m < this.b[l].length; m++) {
+        this.vB[l][m] = this.beta * this.vB[l][m] + gB[l][m] / n;
+        this.b[l][m] -= lr * this.vB[l][m];
+      }
+    }
+    return loss / n;
+  };
+
+  Net.prototype.accuracy = function (ds) {
+    var ok = 0;
+    for (var k = 0; k < ds.X.length; k++)
+      if ((this.predict(ds.X[k]) > 0.5 ? 1 : 0) === ds.y[k]) ok++;
+    return ok / ds.X.length;
+  };
+  TML.Net = Net;
+
+  // ---------- analytic gradient vs finite difference ----------
+  TML.gradCheck = function (sizes, seed, eps) {
+    eps = eps || 1e-5;
+    var net = new Net(sizes, seed), ds = makeDS('xor', 5, 99);
+    function lossOf(n) {
+      var L = n.W.length, loss = 0;
+      for (var k = 0; k < ds.X.length; k++) {
+        var p = n.predict(ds.X[k]);
+        p = Math.min(1 - 1e-9, Math.max(1e-9, p));
+        loss += -(ds.y[k] * Math.log(p) + (1 - ds.y[k]) * Math.log(1 - p));
+      }
+      return loss / ds.X.length;
+    }
+    function clone(n) {
+      var c = new Net(n.sizes, 1);
+      for (var l = 0; l < n.W.length; l++) { c.W[l].set(n.W[l]); c.b[l].set(n.b[l]); }
+      return c;
+    }
+    function analyticGrad(l, m) { // per-parameter analytic grad via trainEpoch code path
+      var c = clone(net);
+      var L = c.W.length, gW = [], gB = [];
+      for (var q = 0; q < L; q++) { gW.push(new Float64Array(c.W[q].length)); gB.push(new Float64Array(c.b[q].length)); }
+      for (var k = 0; k < ds.X.length; k++) {
+        var acts = forward(c, ds.X[k]);
+        var delta = [Float64Array.from([acts[L][0] - ds.y[k]])];
+        for (var q = L - 1; q >= 0; q--) {
+          var prev = acts[q], d = delta[0];
+          for (var j = 0; j < d.length; j++) {
+            gB[q][j] += d[j];
+            for (var i = 0; i < prev.length; i++) gW[q][j * prev.length + i] += d[j] * prev[i];
+          }
+          if (q > 0) {
+            var dP = new Float64Array(c.sizes[q]);
+            for (i = 0; i < dP.length; i++) {
+              var s2 = 0;
+              for (j = 0; j < d.length; j++) s2 += c.W[q][j * dP.length + i] * d[j];
+              dP[i] = s2 * (1 - acts[q][i] * acts[q][i]);
+            }
+            delta = [dP];
+          }
+        }
+      }
+      return gW[l][m] / ds.X.length;
+    }
+    var maxRel = 0, worst = '';
+    for (var l = 0; l < net.W.length; l++) {
+      for (var m = 0; m < net.W[l].length; m++) {
+        var orig = net.W[l][m], h = eps;
+        net.W[l][m] = orig + h; var lp = lossOf(net);
+        net.W[l][m] = orig - h; var lm = lossOf(net);
+        net.W[l][m] = orig;
+        var fd = (lp - lm) / (2 * h);
+        var an = analyticGrad(l, m);
+        var denom = Math.max(1e-8, Math.abs(fd) + Math.abs(an));
+        var rel = Math.abs(fd - an) / denom;
+        if (rel > maxRel) { maxRel = rel; worst = 'W' + l + '[' + m + ']'; }
+      }
+    }
+    return { maxRelErr: maxRel, worst: worst };
+  };
+
+  // ---------- decision grid ----------
+  TML.grid = function (net, res) {
+    var g = new Float64Array(res * res);
+    for (var j = 0; j < res; j++)
+      for (var i = 0; i < res; i++) {
+        var x = (i / (res - 1)) * 2 - 1, y = 1 - (j / (res - 1)) * 2;
+        g[j * res + i] = net.predict([x, y]);
+      }
+    return g;
+  };
+
+  globalThis.TML = TML;
+})();
+</script>
+
+<script id="ui">
+(function () {
+  if (typeof document === "undefined") return;
+  var $ = function (id) { return document.getElementById(id); };
+  var board = $('board'), bctx = board.getContext('2d');
+  var chart = $('lossChart'), cctx = chart.getContext('2d');
+  var net = null, ds = null, step = 0, timer = null, losses = [];
+
+  function curDS() { return $('dsSel').value; }
+  function curH() { return parseInt($('hSel').value, 10); }
+  function curLR() { return parseFloat($('lrSel').value); }
+
+  function reset() {
+    net = new TML.Net([2, curH(), curH(), 1], 20260914);
+    ds = TML.makeDS(curDS(), 220, 42);
+    step = 0; losses = [];
+    stop(); render();
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; }
+    $('btnTrain').disabled = false; $('btnPause').disabled = true; }
+  function train50() {
+    for (var i = 0; i < 50; i++) losses.push(net.trainEpoch(ds, curLR()));
+    step += 50; render();
+  }
+  function start() {
+    stop();
+    timer = setInterval(train50, 60);
+    $('btnTrain').disabled = true; $('btnPause').disabled = false;
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  // p=0 -> blue, p=1 -> red, p=0.5 -> near white
+  function colorOf(p) {
+    var r, g, bl;
+    if (p < 0.5) { var t = p / 0.5; r = Math.round(lerp(42, 245, t)); g = Math.round(lerp(125, 244, t)); bl = Math.round(lerp(225, 236, t)); }
+    else { var t2 = (p - 0.5) / 0.5; r = Math.round(lerp(245, 226, t2)); g = Math.round(lerp(244, 89, t2)); bl = Math.round(lerp(236, 63, t2)); }
+    return 'rgb(' + r + ',' + g + ',' + bl + ')';
+  }
+
+  function render() {
+    // decision surface
+    var res = 96, g = TML.grid(net, res), cell = board.width / res;
+    for (var j = 0; j < res; j++)
+      for (var i = 0; i < res; i++) {
+        bctx.fillStyle = colorOf(g[j * res + i]);
+        bctx.fillRect(i * cell, j * cell, cell + 0.5, cell + 0.5);
+      }
+    // points
+    for (var k = 0; k < ds.X.length; k++) {
+      var px = (ds.X[k][0] + 1) / 2 * board.width,
+          py = (1 - (ds.X[k][1] + 1) / 2) * board.height;
+      bctx.beginPath();
+      bctx.arc(px, py, 3.4, 0, 2 * Math.PI);
+      bctx.fillStyle = ds.y[k] ? '#a3321c' : '#154f86';
+      bctx.fill();
+      bctx.lineWidth = 1.2; bctx.strokeStyle = '#fff'; bctx.stroke();
+    }
+    // loss chart
+    cctx.clearRect(0, 0, chart.width, chart.height);
+    cctx.strokeStyle = '#e3e7ee'; cctx.strokeRect(0.5, 0.5, chart.width - 1, chart.height - 1);
+    if (losses.length > 1) {
+      var maxL = Math.max.apply(null, losses.slice(0, 5)), minL = 0;
+      cctx.beginPath();
+      for (var m = 0; m < losses.length; m++) {
+        var cx = m / (losses.length - 1) * (chart.width - 8) + 4,
+            cy = chart.height - 6 - (Math.min(losses[m], maxL) - minL) / (maxL - minL || 1) * (chart.height - 14);
+        if (m === 0) cctx.moveTo(cx, cy); else cctx.lineTo(cx, cy);
+      }
+      cctx.strokeStyle = '#2456e6'; cctx.lineWidth = 1.6; cctx.stroke();
+    }
+    $('stStep').textContent = step;
+    $('stLoss').textContent = losses.length ? losses[losses.length - 1].toFixed(4) : '—';
+    $('stAcc').textContent = (net.accuracy(ds) * 100).toFixed(1) + '%';
+  }
+
+  $('btnTrain').onclick = start;
+  $('btnPause').onclick = stop;
+  $('btnStep').onclick = train50;
+  $('btnReset').onclick = reset;
+  $('dsSel').onchange = reset;
+  $('hSel').onchange = reset;
+  reset();
+})();
+</script>
+</body>
+</html>
