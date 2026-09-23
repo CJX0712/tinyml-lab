@@ -1,5 +1,12 @@
 # TinyML Lab
 
+<p align="center">
+  <a href="https://github.com/CJX0712/tinyml-lab/actions/workflows/ci.yml"><img src="https://github.com/CJX0712/tinyml-lab/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="https://github.com/CJX0712/tinyml-lab/releases"><img src="https://img.shields.io/github/v/release/CJX0712/tinyml-lab?sort=semver" alt="release"></a>
+  <a href="https://github.com/CJX0712/tinyml-lab/blob/main/LICENSE"><img src="https://img.shields.io/github/license/CJX0712/tinyml-lab" alt="license"></a>
+  <img src="https://img.shields.io/badge/author-%E6%99%A8%E6%98%9F-1f6feb" alt="author">
+</p>
+
 零依赖单文件 HTML：一个 2→H→H→1 的多层感知机（MLP）在你浏览器里从零训练，实时可视化决策边界的形成。
 
 ## 特性
